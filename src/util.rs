@@ -39,7 +39,7 @@ impl Digest {
 
     /// Calculate the SHA-512 digest of the contents of `path`, running
     /// the actual hash computation on a background thread in `pool`.
-    pub fn file<T>(path: T, pool: &CpuPool) -> SFuture<String>
+    pub fn file<T>(path: T, pool: &CpuPool) -> SFuture<(PathBuf, String)>
         where T: Into<PathBuf>
     {
         let path = path.into();
@@ -55,7 +55,7 @@ impl Digest {
                 }
                 m.update(&buffer[..count]);
             }
-            Ok(m.finish())
+            Ok((path, m.finish()))
         }))
     }
 
