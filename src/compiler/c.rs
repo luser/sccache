@@ -160,7 +160,7 @@ impl <I> CCompiler<I>
 {
     pub fn new(compiler: I, executable: PathBuf, pool: &CpuPool) -> SFuture<CCompiler<I>>
     {
-        Box::new(Digest::file(executable.clone(), &pool).map(move |digest| {
+        Box::new(Digest::file(executable, &pool).map(move |(executable, digest)| {
             CCompiler {
                 executable: executable,
                 executable_digest: digest,
