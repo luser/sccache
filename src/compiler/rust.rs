@@ -22,7 +22,7 @@ use mock_command::{CommandCreatorSync, RunCommand};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::env::consts::DLL_EXTENSION;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs::{self, File};
 use std::hash::Hash;
@@ -67,7 +67,7 @@ pub struct RustHasher {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedArguments {
     /// The full commandline, with arguments and their values as pairs.
-    arguments: Vec<(OsString, Option<OsString>)>,
+    arguments: Vec<(OsString, Option<String>)>,
     /// The location of compiler outputs.
     output_dir: PathBuf,
     /// Paths to extern crates used in the compile.
@@ -104,7 +104,7 @@ lazy_static! {
 }
 
 /// Version number for cache key.
-const CACHE_VERSION: &[u8] = b"2";
+const CACHE_VERSION: &[u8] = b"3";
 
 /// Calculate the SHA-1 digest of each file in `files` on background threads
 /// in `pool`.
@@ -316,13 +316,14 @@ enum RustArgAttribute {
     CrateType,
     OutDir,
     CodeGen,
+    //RemapPathPrefix,
     PassThrough,
 }
 
 use self::RustArgAttribute::*;
 
 // These are taken from https://github.com/rust-lang/rust/blob/b671c32ddc8c36d50866428d83b7716233356721/src/librustc/session/config.rs#L1186
-static ARGS: [(ArgInfo, RustArgAttribute); 33] = [
+static ARGS: [(ArgInfo, RustArgAttribute); 34] = [
     flag!("-", TooHard),
     take_arg!("--allow", Path, CanBeSeparated('='), PassThrough),
     take_arg!("--cap-lints", Path, CanBeSeparated('='), PassThrough),
@@ -341,6 +342,7 @@ static ARGS: [(ArgInfo, RustArgAttribute); 33] = [
     take_arg!("--out-dir", String, CanBeSeparated('='), OutDir),
     take_arg!("--pretty", String, CanBeSeparated('='), NotCompilation),
     take_arg!("--print", String, CanBeSeparated('='), NotCompilation),
+    take_arg!("--remap-path-prefix", String, CanBeSeparated('='), PassThrough),
     take_arg!("--sysroot", String, CanBeSeparated('='), NotCompilation),
     take_arg!("--target", Path, CanBeSeparated('='), PassThrough),
     take_arg!("--unpretty", String, CanBeSeparated('='), NotCompilation),
@@ -388,7 +390,7 @@ fn parse_arguments(arguments: &[OsString], cwd: &Path) -> CompilerArguments<Pars
         // strip colors if necessary.
         match item.data {
             Some(Color) => {}
-            _ => args.push((arg, item.arg.get_value().map(|s| s.into()))),
+            _ => args.push((arg, value.clone())),
         }
         match item.data {
             Some(TooHard) => {
@@ -587,8 +589,9 @@ impl<T> CompilerHasher<T> for RustHasher
                     Some((arg, val))
                 }
             })
-            .flat_map(|(arg, val)| Some(arg).into_iter().chain(val))
-            .map(|a| a.clone())
+            .flat_map(|(arg, val)| {
+                Some(arg.clone()).into_iter().chain(val.as_ref().map(OsString::from))
+            })
             .collect::<Vec<_>>();
         let source_hashes = hash_source_files(creator, &crate_name, &executable, &filtered_arguments, cwd, env_vars, pool);
         // Hash the contents of the externs listed on the commandline.
@@ -620,19 +623,38 @@ impl<T> CompilerHasher<T> for RustHasher
                 m.update(d.as_bytes());
             }
             // 3. The full commandline (self.arguments)
-            // TODO: there will be full paths here, it would be nice to
-            // normalize them so we can get cross-machine cache hits.
-            // A few argument types are not passed in a deterministic order
-            // by cargo: --extern, -L, --cfg. We'll filter those out, sort them,
-            // and append them to the rest of the arguments.
             let args = {
                 let (mut sortables, rest): (Vec<_>, Vec<_>) = arguments.iter()
-                    .partition(|&&(ref arg, _)| arg == "--extern" || arg == "-L" || arg == "--cfg");
+                // We exclude a few arguments from the hash:
+                //   -L, --extern, --out-dir
+                // These contain paths which aren't relevant to the output, and the compiler inputs
+                // in those paths (rlibs and static libs used in the compilation) are used as hash
+                // inputs below.
+                    .filter(|&&(ref arg, _)| {
+                        !(arg == "--extern" || arg == "-L" || arg == "--out-dir")
+                    })
+                // A few argument types were not passed in a deterministic order
+                // by older versions of cargo: --extern, -L, --cfg. We'll filter the rest of those
+                // out, sort them, and append them to the rest of the arguments.
+                    .partition(|&&(ref arg, _)| arg == "--cfg");
                 sortables.sort();
                 rest.into_iter()
                     .chain(sortables)
-                    .flat_map(|&(ref arg, ref val)| {
-                        iter::once(arg).chain(val.as_ref())
+                // --remap-path-prefix needs special handling--it takes FROM and TO paths, but
+                // only the TO path will appear in the output, so we will strip the FROM path
+                // out of its argument for hashing purposes so that invoking rustc with e.g.:
+                // --remap-path-prefix=/one=/a
+                // --remap-path-prefix=/two=/a
+                // and otherwise identical options will generate the same hash.
+                    .map(|&(ref arg, ref val)| {
+                        if arg == "--remap-path-prefix" {
+                            (arg, val.as_ref().and_then(|v| v.rsplitn(2, '=').next()))
+                        } else {
+                            (arg, val.as_ref().map(|s| s.as_str()))
+                        }
+                    })
+                    .flat_map(|(ref arg, ref val)| {
+                        iter::once(arg.as_os_str()).chain(val.map(OsStr::new))
                     })
                     .fold(OsString::new(), |mut a, b| {
                         a.push(b);
@@ -664,7 +686,9 @@ impl<T> CompilerHasher<T> for RustHasher
             }
             // Turn arguments into a simple Vec<OsString> for compilation.
             let arguments: Vec<OsString> = arguments.into_iter()
-                .flat_map(|(arg, val)| Some(arg).into_iter().chain(val))
+                .flat_map(|(arg, val)| {
+                    Some(arg.clone()).into_iter().chain(val.map(OsString::from))
+                })
                 // Always request color output, the client will strip colors if needed.
                 .chain(iter::once("--color=always".into()))
                 .collect();
@@ -1010,9 +1034,9 @@ c:/foo/bar.rs:
             compiler_shlibs_digests: vec![FAKE_DIGEST.to_owned()],
             parsed_args: ParsedArguments {
                 arguments: vec![("a".into(), None),
-                                ("--extern".into(), Some("xyz".into())),
+                                ("--cfg".into(), Some("xyz".into())),
                                 ("b".into(), None),
-                                ("--extern".into(), Some("abc".into())),
+                                ("--cfg".into(), Some("abc".into())),
                                 ],
                 output_dir: "foo/".into(),
                 externs: vec!["bar.rlib".into()],
@@ -1040,8 +1064,8 @@ c:/foo/bar.rs:
         m.update(CACHE_VERSION);
         // sysroot shlibs digests.
         m.update(FAKE_DIGEST.as_bytes());
-        // Arguments, with externs sorted at the end.
-        OsStr::new("ab--externabc--externxyz").hash(&mut HashToDigest { digest: &mut m });
+        // Arguments, with cfgs sorted at the end.
+        OsStr::new("ab--cfgabc--cfgxyz").hash(&mut HashToDigest { digest: &mut m });
         // bar.rs (source file, from dep-info)
         m.update(empty_digest.as_bytes());
         // foo.rs (source file, from dep-info)
@@ -1125,6 +1149,16 @@ c:/foo/bar.rs:
     }
 
     #[test]
+    fn test_equal_hashes_ignored_args() {
+        assert_eq!(hash_key(&ovec!["--emit", "link", "-L", "x=x", "foo.rs", "--out-dir", "out",
+                                   "--extern", "a=1", "--crate-name", "foo", "-L", "y=y"],
+                            &vec![], nothing),
+                   hash_key(&ovec!["-L", "y=a", "--emit", "link", "-L", "x=b", "foo.rs",
+                                   "--extern", "a=2", "--out-dir", "out2", "--crate-name", "foo"],
+                            &vec![], nothing));
+    }
+
+    #[test]
     fn test_equal_hashes_cfg_features() {
         assert_eq!(hash_key(&ovec!["--emit", "link", "--cfg", "feature=a", "foo.rs", "--out-dir",
                                    "out", "--crate-name", "foo", "--cfg", "feature=b"], &vec![],
@@ -1132,5 +1166,21 @@ c:/foo/bar.rs:
                    hash_key(&ovec!["--cfg", "feature=b", "--emit", "link", "--cfg", "feature=a",
                                    "foo.rs", "--out-dir", "out", "--crate-name", "foo"], &vec![],
                             nothing));
+    }
+
+    #[test]
+    fn test_equal_hashes_remap_path_prefix() {
+        assert_eq!(hash_key(&ovec!["--emit", "link", "foo.rs", "--out-dir", "out",
+                                   "--crate-name", "foo",
+                                   "--remap-path-prefix", "/one=/a"], &vec![], nothing),
+                   hash_key(&ovec!["--emit", "link", "foo.rs", "--out-dir", "out",
+                                   "--crate-name", "foo",
+                                   "--remap-path-prefix", "/two=/a"], &vec![], nothing));
+        assert_neq!(hash_key(&ovec!["--emit", "link", "foo.rs", "--out-dir", "out",
+                                    "--crate-name", "foo",
+                                    "--remap-path-prefix", "/one=/a"], &vec![], nothing),
+                   hash_key(&ovec!["--emit", "link", "foo.rs", "--out-dir", "out",
+                                   "--crate-name", "foo",
+                                   "--remap-path-prefix", "/one=/b"], &vec![], nothing));
     }
 }
