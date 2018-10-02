@@ -598,6 +598,13 @@ pub fn run_command(cmd: Command) -> Result<i32> {
         Command::StartServer => {
             trace!("Command::StartServer");
             println!("Starting sccache server...");
+            println!("Environment variables:
+======================");
+            for (k, v) in env::vars_os() {
+                println!("{}={}", k.to_string_lossy(), v.to_string_lossy());
+            }
+            println!("======================");
+
             let startup = run_server_process().chain_err(|| {
                 "failed to start server process"
             })?;

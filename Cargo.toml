@@ -46,7 +46,7 @@ serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
 strip-ansi-escapes = "0.1"
-tempdir = "0.3.4"
+tempdir = { git = "https://github.com/luser/tempdir/", rev = "7473ffa14bd5e808c3f31ff3e728acb7a6d1c1aa" }
 tempfile = "2.1.5"
 time = "0.1.35"
 tokio-core = "0.1.6"
