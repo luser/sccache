@@ -24,7 +24,7 @@ use compiler::args::*;
 use compiler::c::{CCompilerImpl, CCompilerKind, Language, ParsedArguments};
 use dist;
 use local_encoding::{Encoding, Encoder};
-use log::Level::Debug;
+
 use futures::future::Future;
 use futures_cpupool::CpuPool;
 use mock_command::{
@@ -492,9 +492,7 @@ pub fn preprocess<T>(creator: &T,
         cmd.arg("-showIncludes");
     }
 
-    if log_enabled!(Debug) {
-        debug!("preprocess: {:?}", cmd);
-    }
+    debug!(preprocess = ::tokio_trace::field::debug(&cmd));
 
     let parsed_args = parsed_args.clone();
     let includes_prefix = includes_prefix.to_string();

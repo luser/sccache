@@ -3,15 +3,12 @@ extern crate base64;
 #[macro_use]
 extern crate clap;
 extern crate crossbeam_utils;
-extern crate env_logger;
 #[macro_use]
 extern crate error_chain;
 extern crate flate2;
 extern crate hyperx;
 extern crate jsonwebtoken as jwt;
 extern crate libmount;
-#[macro_use]
-extern crate log;
 extern crate lru_disk_cache;
 extern crate nix;
 extern crate openssl;
@@ -22,6 +19,10 @@ extern crate sccache;
 extern crate serde_derive;
 extern crate serde_json;
 extern crate tar;
+#[macro_use]
+extern crate tokio_trace;
+extern crate tokio_trace_fmt;
+
 extern crate void;
 
 use arraydeque::ArrayDeque;
@@ -38,7 +39,6 @@ use sccache::dist::{
     UpdateJobStateResult,
 };
 use std::collections::{btree_map, BTreeMap, HashMap, HashSet};
-use std::env;
 use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::Path;
@@ -98,29 +98,33 @@ enum AuthSubcommand {
 // Only supported on x86_64 Linux machines
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn main() {
-    init_logging();
-    std::process::exit(match parse() {
-        Ok(cmd) => match run(cmd) {
-            Ok(s) => s,
-            Err(e) => {
-                let stderr = &mut std::io::stderr();
-                writeln!(stderr, "error: {}", e).unwrap();
+    let subscriber = tokio_trace_fmt::FmtSubscriber::builder()
+        .full()
+        .finish();
+    tokio_trace::subscriber::with_default(subscriber, ||{
+        std::process::exit(match parse() {
+            Ok(cmd) => match run(cmd) {
+                Ok(s) => s,
+                Err(e) => {
+                    let stderr = &mut std::io::stderr();
+                    writeln!(stderr, "error: {}", e).unwrap();
 
-                for e in e.iter().skip(1) {
-                    writeln!(stderr, "caused by: {}", e).unwrap();
+                    for e in e.iter().skip(1) {
+                        writeln!(stderr, "caused by: {}", e).unwrap();
+                    }
+                    2
                 }
-                2
+            },
+            Err(e) => {
+                println!("sccache: {}", e);
+                for e in e.iter().skip(1) {
+                    println!("caused by: {}", e);
+                }
+                get_app().print_help().unwrap();
+                println!("");
+                1
             }
-        },
-        Err(e) => {
-            println!("sccache: {}", e);
-            for e in e.iter().skip(1) {
-                println!("caused by: {}", e);
-            }
-            get_app().print_help().unwrap();
-            println!("");
-            1
-        }
+        });
     });
 }
 

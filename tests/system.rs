@@ -37,7 +37,7 @@ use harness::{
     write_json_cfg, write_source,
     get_stats, zero_stats,
 };
-use log::Level::Trace;
+
 use predicates::prelude::*;
 use std::collections::HashMap;
 use std::env;

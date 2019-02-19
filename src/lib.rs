@@ -32,7 +32,6 @@ extern crate crypto;
 #[cfg(unix)]
 extern crate daemonize;
 extern crate directories;
-extern crate env_logger;
 #[macro_use]
 extern crate error_chain;
 extern crate filetime;
@@ -55,8 +54,6 @@ extern crate kernel32;
 #[macro_use]
 extern crate lazy_static;
 extern crate local_encoding;
-#[macro_use]
-extern crate log;
 extern crate libc;
 extern crate lru_disk_cache;
 #[cfg(feature = "memcached")]
@@ -96,6 +93,9 @@ extern crate tokio_serde_bincode;
 extern crate tokio_service;
 extern crate tokio_tcp;
 extern crate tokio_timer;
+#[macro_use]
+extern crate tokio_trace;
+extern crate tokio_trace_fmt;
 extern crate toml;
 #[cfg(any(feature = "azure", feature = "gcs", feature = "dist-client"))]
 extern crate url;
@@ -134,42 +134,35 @@ mod simples3;
 #[doc(hidden)]
 pub mod util;
 
-use std::env;
 use std::io::Write;
 
 pub fn main() {
-    init_logging();
-    std::process::exit(match cmdline::parse() {
-        Ok(cmd) => match commands::run_command(cmd) {
-            Ok(s) => s,
-            Err(e) => {
-                let stderr = &mut std::io::stderr();
-                writeln!(stderr, "error: {}", e).unwrap();
+    let subscriber = tokio_trace_fmt::FmtSubscriber::builder()
+        .full()
+        .finish();
+    tokio_trace::subscriber::with_default(subscriber, ||{
+        std::process::exit(match cmdline::parse() {
+            Ok(cmd) => match commands::run_command(cmd) {
+                Ok(s) => s,
+                Err(e) => {
+                    let stderr = &mut std::io::stderr();
+                    writeln!(stderr, "error: {}", e).unwrap();
 
-                for e in e.iter().skip(1) {
-                    writeln!(stderr, "caused by: {}", e).unwrap();
+                    for e in e.iter().skip(1) {
+                        writeln!(stderr, "caused by: {}", e).unwrap();
+                    }
+                    2
                 }
-                2
+            },
+            Err(e) => {
+                println!("sccache: {}", e);
+                for e in e.iter().skip(1) {
+                    println!("caused by: {}", e);
+                }
+                cmdline::get_app().print_help().unwrap();
+                println!("");
+                1
             }
-        },
-        Err(e) => {
-            println!("sccache: {}", e);
-            for e in e.iter().skip(1) {
-                println!("caused by: {}", e);
-            }
-            cmdline::get_app().print_help().unwrap();
-            println!("");
-            1
-        }
+        });
     });
 }
-
-fn init_logging() {
-    if env::var("RUST_LOG").is_ok() {
-        match env_logger::try_init() {
-            Ok(_) => (),
-            Err(e) => panic!(format!("Failed to initalize logging: {:?}", e)),
-        }
-    }
-}
-

@@ -21,7 +21,7 @@ use compiler::c::{CCompilerImpl, CCompilerKind, Language, ParsedArguments};
 use compiler::{Cacheable, CompileCommand, CompilerArguments};
 use dist;
 use errors::*;
-use log::Level::Trace;
+
 use mock_command::{CommandCreatorSync, RunCommand};
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -284,9 +284,7 @@ where
         .envs(env_vars.iter().map(|&(ref k, ref v)| (k, v)))
         .current_dir(cwd);
 
-    if log_enabled!(Trace) {
-        trace!("preprocess: {:?}", cmd);
-    }
+    trace!(preprocess = ::tokio_trace::field::debug(&cmd));
     run_input_output(cmd, None)
 }
 

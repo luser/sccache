@@ -22,7 +22,6 @@ use dist;
 use dist::pkg;
 use futures::Future;
 use futures_cpupool::CpuPool;
-use log::Level::Trace;
 #[cfg(feature = "dist-client")]
 use lru_disk_cache::lru_cache;
 use mock_command::{CommandCreatorSync, RunCommand};
@@ -311,9 +310,8 @@ fn get_compiler_outputs<T>(creator: &T,
         .env_clear()
         .envs(ref_env(env_vars))
         .current_dir(cwd);
-    if log_enabled!(Trace) {
-        trace!("get_compiler_outputs: {:?}", cmd);
-    }
+    trace!(get_compiler_outputs = ::tokio_trace::field::debug(&cmd));
+
     let outputs = run_input_output(cmd, None);
     Box::new(outputs.and_then(move |output| -> Result<_> {
         let outstr = String::from_utf8(output.stdout).chain_err(|| "Error parsing rustc output")?;
@@ -1322,11 +1320,11 @@ impl pkg::InputsPackager for RustInputsPackager {
             tar_inputs.push((input_path, dist_input_path))
         }
 
-        if log_enabled!(Trace) {
+        // if log_enabled!(Trace) {
             if let Some((_, ref dep_crate_names)) = rlib_dep_reader_and_names {
                 trace!("Identified dependency crate names: {:?}", dep_crate_names)
             }
-        }
+        // }
 
         // Given the link paths, find the things we need to send over the wire to the remote machine. If
         // we've been able to use a dependency searcher then we can filter down just candidates for that

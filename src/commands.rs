@@ -21,7 +21,6 @@ use compiler::ColorMode;
 use config::Config;
 use futures::Future;
 use jobserver::Client;
-use log::Level::Trace;
 use mock_command::{CommandChild, CommandCreatorSync, ProcessCommandCreator, RunCommand};
 use protocol::{Compile, CompileFinished, CompileResponse, Request, Response};
 use serde_json;
@@ -568,9 +567,7 @@ where
 
     let mut cmd = creator.new_command_sync(exe);
     cmd.args(&cmdline).current_dir(cwd);
-    if log_enabled!(Trace) {
-        trace!("running command: {:?}", cmd);
-    }
+    trace!(commmand = ::tokio_trace::field::debug(&cmd));
     match runtime.block_on(
         cmd.spawn()
             .and_then(|c| c.wait().chain_err(|| "failed to wait for child")),
