@@ -237,20 +237,17 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
         let me = *self;
         let CCompilerHasher { parsed_args, executable, executable_digest, compiler } = me;
         let result = compiler.preprocess(creator, &executable, &parsed_args, &cwd, &env_vars, may_dist);
-        let out_pretty = parsed_args.output_pretty().into_owned();
         let env_vars = env_vars.to_vec();
         let result = result.map_err(move |e| {
-            debug!("[{}]: preprocessor failed: {:?}", out_pretty, e);
+            debug!("preprocessor failed: {:?}",  e);
             e
         });
-        let out_pretty = parsed_args.output_pretty().into_owned();
         let extra_hashes = hash_all(&parsed_args.extra_hash_files, &pool.clone());
 
         Box::new(result.or_else(move |err| {
             match err {
                 Error(ErrorKind::ProcessError(output), _) => {
-                    debug!("[{}]: preprocessor returned error status {:?}",
-                           out_pretty,
+                    debug!("preprocessor returned error status {:?}",
                            output.status.code());
                     // Drop the stdout since it's the preprocessor output, just hand back stderr and
                     // the exit status.
@@ -262,8 +259,7 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
                 e @ _ => Err(e),
             }
         }).and_then(move |preprocessor_result| {
-            trace!("[{}]: Preprocessor output is {} bytes",
-                   parsed_args.output_pretty(),
+            trace!("Preprocessor output is {} bytes",
                    preprocessor_result.stdout.len());
 
             Box::new(extra_hashes.and_then(move |extra_hashes| {

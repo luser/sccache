@@ -190,12 +190,12 @@ const CACHE_VERSION: &[u8] = b"3";
 
 /// Get absolute paths for all source files listed in rustc's dep-info output.
 fn get_source_files<T>(creator: &T,
-                        crate_name: &str,
-                        executable: &Path,
-                        arguments: &[OsString],
-                        cwd: &Path,
-                        env_vars: &[(OsString, OsString)],
-                        pool: &CpuPool)
+                       crate_name: &str,
+                       executable: &Path,
+                       arguments: &[OsString],
+                       cwd: &Path,
+                       env_vars: &[(OsString, OsString)],
+                       pool: &CpuPool)
                         -> SFuture<Vec<PathBuf>>
     where T: CommandCreatorSync,
 {
@@ -211,21 +211,20 @@ fn get_source_files<T>(creator: &T,
         .env_clear()
         .envs(ref_env(env_vars))
         .current_dir(cwd);
-    trace!("[{}]: get dep-info: {:?}", crate_name, cmd);
+    trace!("get dep-info: {:?}", cmd);
     let dep_info = run_input_output(cmd, None);
     // Parse the dep-info file, then hash the contents of those files.
     let pool = pool.clone();
     let cwd = cwd.to_owned();
     let crate_name = crate_name.to_owned();
     Box::new(dep_info.and_then(move |_| -> SFuture<_> {
-        let name2 = crate_name.clone();
         let parsed = pool.spawn_fn(move || {
             parse_dep_file(&dep_file, &cwd).chain_err(|| {
-                format!("Failed to parse dep info for {}", name2)
+                format!("Failed to parse dep info for {}", crate_name)
             })
         });
         Box::new(parsed.map(move |files| {
-            trace!("[{}]: got {} source files from dep-info in {}", crate_name,
+            trace!("got {} source files from dep-info in {}",
                    files.len(), fmt_duration_as_secs(&start.elapsed()));
             // Just to make sure we capture temp_dir.
             drop(temp_dir);
@@ -950,7 +949,7 @@ impl<T> CompilerHasher<T> for RustHasher
                     color_mode: _,
                 },
         } = me;
-        trace!("[{}]: generate_hash_key", crate_name);
+        trace!("generate_hash_key");
         // TODO: this doesn't produce correct arguments if they should be concatenated - should use iter_os_strings
         let os_string_arguments: Vec<(OsString, Option<OsString>)> = arguments.iter()
             .map(|arg| (arg.to_os_string(), arg.get_data().cloned().map(IntoArg::into_arg_os_string))).collect();
@@ -976,11 +975,11 @@ impl<T> CompilerHasher<T> for RustHasher
                 hash_all(&source_files, &source_hashes_pool).map(|source_hashes| (source_files, source_hashes))
             });
         // Hash the contents of the externs listed on the commandline.
-        trace!("[{}]: hashing {} externs", crate_name, externs.len());
+        trace!("hashing {} externs", externs.len());
         let abs_externs = externs.iter().map(|e| cwd.join(e)).collect::<Vec<_>>();
         let extern_hashes = hash_all(&abs_externs, pool);
         // Hash the contents of the staticlibs listed on the commandline.
-        trace!("[{}]: hashing {} staticlibs", crate_name, staticlibs.len());
+        trace!("hashing {} staticlibs", staticlibs.len());
         let abs_staticlibs = staticlibs.iter().map(|s| cwd.join(s)).collect::<Vec<_>>();
         let staticlib_hashes = hash_all(&abs_staticlibs, pool);
         let creator = creator.clone();
@@ -1132,11 +1131,11 @@ impl Compilation for RustCompilation {
     fn generate_compile_commands(&self, path_transformer: &mut dist::PathTransformer)
                                 -> Result<(CompileCommand, Option<dist::CompileCommand>, Cacheable)>
     {
-        let RustCompilation { ref executable, ref arguments, ref crate_name, ref cwd, ref env_vars, #[cfg(feature = "dist-client")] ref host, #[cfg(feature = "dist-client")] ref sysroot, .. } = *self;
+        let RustCompilation { ref executable, ref arguments, ref cwd, ref env_vars, #[cfg(feature = "dist-client")] ref host, #[cfg(feature = "dist-client")] ref sysroot, .. } = *self;
         #[cfg(not(feature = "dist-client"))]
         let _ = path_transformer;
 
-        trace!("[{}]: compile", crate_name);
+        trace!("compile");
 
         let command = CompileCommand {
             executable: executable.to_owned(),

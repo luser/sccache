@@ -835,135 +835,136 @@ where
             CacheControl::Default
         };
         let out_pretty = hasher.output_pretty().into_owned();
-        let span = span!("compile", out = &field::display(out_pretty));
+        let mut span = span!("compile", out = &field::display(out_pretty));
         let color_mode = hasher.color_mode();
-        let result = hasher.get_cached_or_compile(
-            self.dist_client.get_client(),
-            self.creator.clone(),
-            self.storage.clone(),
-            arguments,
-            cwd,
-            env_vars,
-            cache_control,
-            self.pool.clone(),
-        );
-        let me = self.clone();
-        let kind = compiler.kind();
-        let task = result.then(move |result| {
-            let mut cache_write = None;
-            let mut stats = me.stats.borrow_mut();
-            let mut res = CompileFinished::default();
-            res.color_mode = color_mode;
-            match result {
-                Ok((compiled, out)) => {
-                    match compiled {
-                        CompileResult::Error => {
-                            stats.cache_errors.increment(&kind);
-                        }
-                        CompileResult::CacheHit(duration) => {
-                            stats.cache_hits.increment(&kind);
-                            stats.cache_read_hit_duration += duration;
-                        }
-                        CompileResult::CacheMiss(miss_type, dist_type, duration, future) => {
-                            match dist_type {
-                                DistType::NoDist => {}
-                                DistType::Ok => stats.dist_compiles += 1,
-                                DistType::Error => stats.dist_errors += 1,
-                            }
-                            match miss_type {
-                                MissType::Normal => {}
-                                MissType::ForcedRecache => {
-                                    stats.forced_recaches += 1;
-                                }
-                                MissType::TimedOut => {
-                                    stats.cache_timeouts += 1;
-                                }
-                                MissType::CacheReadError => {
-                                    stats.cache_errors.increment(&kind);
-                                }
-                            }
-                            stats.cache_misses.increment(&kind);
-                            stats.cache_read_miss_duration += duration;
-                            cache_write = Some(future);
-                        }
-                        CompileResult::NotCacheable => {
-                            stats.cache_misses.increment(&kind);
-                            stats.non_cacheable_compilations += 1;
-                        }
-                        CompileResult::CompileFailed => {
-                            stats.compile_fails += 1;
-                        }
-                    };
-                    let Output {
-                        status,
-                        stdout,
-                        stderr,
-                    } = out;
-                    trace!("CompileFinished retcode: {}", status);
-                    match status.code() {
-                        Some(code) => res.retcode = Some(code),
-                        None => res.signal = Some(get_signal(status)),
-                    };
-                    res.stdout = stdout;
-                    res.stderr = stderr;
-                }
-                Err(Error(ErrorKind::ProcessError(output), _)) => {
-                    debug!("Compilation failed: {:?}", output);
-                    stats.compile_fails += 1;
-                    match output.status.code() {
-                        Some(code) => res.retcode = Some(code),
-                        None => res.signal = Some(get_signal(output.status)),
-                    };
-                    res.stdout = output.stdout;
-                    res.stderr = output.stderr;
-                }
-                Err(err) => {
-                    use std::fmt::Write;
-
-                    error!("fatal error: {}", err);
-
-                    let mut error = format!("sccache: encountered fatal error\n");
-                    drop(writeln!(error, "sccache: error : {}", err));
-                    for e in err.iter() {
-                        error!("\t{}", e);
-                        drop(writeln!(error, "sccache:  cause: {}", e));
-                    }
-                    stats.cache_errors.increment(&kind);
-                    //TODO: figure out a better way to communicate this?
-                    res.retcode = Some(-2);
-                    res.stderr = error.into_bytes();
-                }
-            };
-            let send = tx.send(Ok(Response::CompileFinished(res)));
-
-            let me = me.clone();
-            let cache_write = cache_write.then(move |result| {
+        let task = span.enter(|| {
+            let result = hasher.get_cached_or_compile(
+                self.dist_client.get_client(),
+                self.creator.clone(),
+                self.storage.clone(),
+                arguments,
+                cwd,
+                env_vars,
+                cache_control,
+                self.pool.clone(),
+                );
+            let me = self.clone();
+            let kind = compiler.kind();
+            result.then(move |result| {
+                let mut cache_write = None;
+                let mut stats = me.stats.borrow_mut();
+                let mut res = CompileFinished::default();
+                res.color_mode = color_mode;
                 match result {
-                    Err(e) => {
-                        debug!("Error executing cache write: {}", e);
-                        me.stats.borrow_mut().cache_write_errors += 1;
+                    Ok((compiled, out)) => {
+                        match compiled {
+                            CompileResult::Error => {
+                                stats.cache_errors.increment(&kind);
+                            }
+                            CompileResult::CacheHit(duration) => {
+                                stats.cache_hits.increment(&kind);
+                                stats.cache_read_hit_duration += duration;
+                            }
+                            CompileResult::CacheMiss(miss_type, dist_type, duration, future) => {
+                                match dist_type {
+                                    DistType::NoDist => {}
+                                    DistType::Ok => stats.dist_compiles += 1,
+                                    DistType::Error => stats.dist_errors += 1,
+                                }
+                                match miss_type {
+                                    MissType::Normal => {}
+                                    MissType::ForcedRecache => {
+                                        stats.forced_recaches += 1;
+                                    }
+                                    MissType::TimedOut => {
+                                        stats.cache_timeouts += 1;
+                                    }
+                                    MissType::CacheReadError => {
+                                        stats.cache_errors.increment(&kind);
+                                    }
+                                }
+                                stats.cache_misses.increment(&kind);
+                                stats.cache_read_miss_duration += duration;
+                                cache_write = Some(future);
+                            }
+                            CompileResult::NotCacheable => {
+                                stats.cache_misses.increment(&kind);
+                                stats.non_cacheable_compilations += 1;
+                            }
+                            CompileResult::CompileFailed => {
+                                stats.compile_fails += 1;
+                            }
+                        };
+                        let Output {
+                            status,
+                            stdout,
+                            stderr,
+                        } = out;
+                        trace!("CompileFinished retcode: {}", status);
+                        match status.code() {
+                            Some(code) => res.retcode = Some(code),
+                            None => res.signal = Some(get_signal(status)),
+                        };
+                        res.stdout = stdout;
+                        res.stderr = stderr;
                     }
-                    //TODO: save cache stats!
-                    Ok(Some(info)) => {
-                        debug!(
-                            "Cache write finished in {}",
-                            util::fmt_duration_as_secs(&info.duration)
-                        );
-                        me.stats.borrow_mut().cache_writes += 1;
-                        me.stats.borrow_mut().cache_write_duration += info.duration;
+                    Err(Error(ErrorKind::ProcessError(output), _)) => {
+                        debug!("Compilation failed: {:?}", output);
+                        stats.compile_fails += 1;
+                        match output.status.code() {
+                            Some(code) => res.retcode = Some(code),
+                            None => res.signal = Some(get_signal(output.status)),
+                        };
+                        res.stdout = output.stdout;
+                        res.stderr = output.stderr;
                     }
+                    Err(err) => {
+                        use std::fmt::Write;
 
-                    Ok(None) => {}
-                }
-                Ok(())
-            });
+                        error!("fatal error: {}", err);
 
-            send.join(cache_write).then(|_| Ok(()))
-        }).instrument(span);
+                        let mut error = format!("sccache: encountered fatal error\n");
+                        drop(writeln!(error, "sccache: error : {}", err));
+                        for e in err.iter() {
+                            error!("\t{}", e);
+                            drop(writeln!(error, "sccache:  cause: {}", e));
+                        }
+                        stats.cache_errors.increment(&kind);
+                        //TODO: figure out a better way to communicate this?
+                        res.retcode = Some(-2);
+                        res.stderr = error.into_bytes();
+                    }
+                };
+                let send = tx.send(Ok(Response::CompileFinished(res)));
 
+                let me = me.clone();
+                let cache_write = cache_write.then(move |result| {
+                    match result {
+                        Err(e) => {
+                            debug!("Error executing cache write: {}", e);
+                            me.stats.borrow_mut().cache_write_errors += 1;
+                        }
+                        //TODO: save cache stats!
+                        Ok(Some(info)) => {
+                            debug!(
+                                "Cache write finished in {}",
+                                util::fmt_duration_as_secs(&info.duration)
+                                    );
+                            me.stats.borrow_mut().cache_writes += 1;
+                            me.stats.borrow_mut().cache_write_duration += info.duration;
+                        }
+
+                        Ok(None) => {}
+                    }
+                    Ok(())
+                });
+
+                send.join(cache_write).then(|_| Ok(()))
+            })
+        });
         tokio::runtime::current_thread::TaskExecutor::current()
-            .spawn_local(Box::new(task))
-            .unwrap();
+                .spawn_local(Box::new(task.instrument(span)))
+                .unwrap();
     }
 }
 
