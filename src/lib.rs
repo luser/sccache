@@ -96,6 +96,7 @@ extern crate tokio_timer;
 #[macro_use]
 extern crate tokio_trace;
 extern crate tokio_trace_fmt;
+extern crate tokio_trace_futures;
 extern crate toml;
 #[cfg(any(feature = "azure", feature = "gcs", feature = "dist-client"))]
 extern crate url;

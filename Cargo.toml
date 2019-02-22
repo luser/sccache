@@ -72,6 +72,7 @@ tokio-service = "0.1"
 tokio-tcp = "0.1"
 tokio-timer = "0.2"
 tokio-trace = { git = "https://github.com/tokio-rs/tokio" }
+tokio-trace-futures = { git = "https://github.com/tokio-rs/tokio-trace-nursery" }
 tokio-trace-fmt = { git = "https://github.com/tokio-rs/tokio-trace-nursery", branch = "eliza/fmt" }
 toml = "0.4"
 uuid = { version = "0.7", features = ["v4"] }
@@ -93,6 +94,9 @@ void = { version = "1", optional = true }
 tiny_http = { git = "https://github.com/aidanhs/tiny-http-sccache.git", rev = "a14fa0a" }
 # Waiting for https://github.com/Keats/jsonwebtoken/pull/74
 jsonwebtoken = { git = "https://github.com/Jake-Shadle/jsonwebtoken.git", rev = "2f469a61" }
+# `tokio-trace-futures` currently thinks it can get `tokio-trace` from
+# crates.io, but it hasn't been published yet.
+tokio-trace = { git = "https://github.com/tokio-rs/tokio" }
 
 [dev-dependencies]
 assert_cmd = "0.9"

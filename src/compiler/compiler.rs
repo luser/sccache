@@ -146,7 +146,7 @@ where
         pool: CpuPool,
     ) -> SFuture<(CompileResult, process::Output)> {
         let out_pretty = self.output_pretty().into_owned();
-        debug!("[{}]: get_cached_or_compile: {:?}", out_pretty, arguments);
+        debug!("get_cached_or_compile: {:?}",  arguments);
         let start = Instant::now();
         let result = self.generate_hash_key(
             &creator,
@@ -157,8 +157,7 @@ where
         );
         Box::new(result.then(move |res| -> SFuture<_> {
             debug!(
-                "[{}]: generate_hash_key took {}",
-                out_pretty,
+                "generate_hash_key took {}",
                 fmt_duration_as_secs(&start.elapsed())
             );
             let (key, compilation, weak_toolchain_key) = match res {
@@ -172,7 +171,7 @@ where
                     weak_toolchain_key,
                 }) => (key, compilation, weak_toolchain_key),
             };
-            trace!("[{}]: Hash key: {}", out_pretty, key);
+            trace!("Hash key: {}",  key);
             // If `ForceRecache` is enabled, we won't check the cache.
             let start = Instant::now();
             let cache_status = if cache_control == CacheControl::ForceRecache {
@@ -197,8 +196,7 @@ where
                 let miss_type = match result {
                     Ok(Cache::Hit(mut entry)) => {
                         debug!(
-                            "[{}]: Cache hit in {}",
-                            out_pretty,
+                            "Cache hit in {}",
                             fmt_duration_as_secs(&duration)
                         );
                         let mut stdout = Vec::new();
@@ -233,16 +231,14 @@ where
                     }
                     Ok(Cache::Miss) => {
                         debug!(
-                            "[{}]: Cache miss in {}",
-                            out_pretty,
+                            "Cache miss in {}",
                             fmt_duration_as_secs(&duration)
                         );
                         MissType::Normal
                     }
                     Ok(Cache::Recache) => {
                         debug!(
-                            "[{}]: Cache recache in {}",
-                            out_pretty,
+                            "Cache recache in {}",
                             fmt_duration_as_secs(&duration)
                         );
                         MissType::ForcedRecache
@@ -250,17 +246,16 @@ where
                     Err(err) => {
                         if err.is_elapsed() {
                             debug!(
-                                "[{}]: Cache timed out {}",
-                                out_pretty,
+                                "Cache timed out {}",
                                 fmt_duration_as_secs(&duration)
                             );
                             MissType::TimedOut
                         } else {
-                            error!("[{}]: Cache read error: {}", out_pretty, err);
+                            error!("Cache read error: {}",  err);
                             if err.is_inner() {
                                 let err = err.into_inner().unwrap();
                                 for e in err.iter().skip(1) {
-                                    error!("[{}] \t{}", out_pretty, e);
+                                    error!("\t{}",  e);
                                 }
                             }
                             MissType::CacheReadError
@@ -284,20 +279,18 @@ where
                         let duration = start.elapsed();
                         if !compiler_result.status.success() {
                             debug!(
-                                "[{}]: Compiled but failed, not storing in cache",
-                                out_pretty
+                                "Compiled but failed, not storing in cache",
                             );
                             return f_ok((CompileResult::CompileFailed, compiler_result))
                                 as SFuture<_>;
                         }
                         if cacheable != Cacheable::Yes {
                             // Not cacheable
-                            debug!("[{}]: Compiled but not cacheable", out_pretty);
+                            debug!("Compiled but not cacheable");
                             return f_ok((CompileResult::NotCacheable, compiler_result));
                         }
                         debug!(
-                            "[{}]: Compiled in {}, storing in cache",
-                            out_pretty,
+                            "Compiled in {}, storing in cache",
                             fmt_duration_as_secs(&duration)
                         );
                         let write = pool.spawn_fn(move || -> Result<_> {
@@ -330,12 +323,11 @@ where
                                     let future = storage.put(&key, entry).then(move |res| {
                                         match res {
                                             Ok(_) => debug!(
-                                                "[{}]: Stored in cache successfully!",
-                                                out_pretty
+                                                "Stored in cache successfully!",
                                             ),
                                             Err(ref e) => debug!(
-                                                "[{}]: Cache write error: {:?}",
-                                                out_pretty, e
+                                                "Cache write error: {:?}",
+                                                 e
                                             ),
                                         }
                                         res.map(|duration| CacheWriteInfo {
@@ -374,7 +366,7 @@ fn dist_or_local_compile<T>(
     _cwd: PathBuf,
     compilation: Box<Compilation>,
     _weak_toolchain_key: String,
-    out_pretty: String,
+    _out_pretty: String,
 ) -> SFuture<(Cacheable, DistType, process::Output)>
 where
     T: CommandCreatorSync,
@@ -388,7 +380,7 @@ where
         Err(e) => return f_err(e),
     };
 
-    debug!("[{}]: Compiling locally", out_pretty);
+    debug!("Compiling locally");
     Box::new(
         compile_cmd
             .execute(&creator)
@@ -403,7 +395,7 @@ fn dist_or_local_compile<T>(
     cwd: PathBuf,
     compilation: Box<Compilation>,
     weak_toolchain_key: String,
-    out_pretty: String,
+    _out_pretty: String,
 ) -> SFuture<(Cacheable, DistType, process::Output)>
 where
     T: CommandCreatorSync,
@@ -423,7 +415,7 @@ where
     let dist_client = match dist_client {
         Some(dc) => dc,
         None => {
-            debug!("[{}]: Compiling locally", out_pretty);
+            debug!("Compiling locally");
             return Box::new(
                 compile_cmd
                     .execute(&creator)
@@ -432,7 +424,7 @@ where
         }
     };
 
-    debug!("[{}]: Attempting distributed compilation", out_pretty);
+    debug!("Attempting distributed compilation");
     let compile_out_pretty = out_pretty.clone();
     let compile_out_pretty2 = out_pretty.clone();
     let compile_out_pretty3 = out_pretty.clone();
@@ -441,7 +433,7 @@ where
     // TODO: the number of map_errs is subideal, but there's no futures-based carrier trait AFAIK
     Box::new(future::result(dist_compile_cmd.ok_or_else(|| "Could not create distributed compile command".into()))
         .and_then(move |dist_compile_cmd| {
-            debug!("[{}]: Creating distributed compile request", compile_out_pretty);
+            debug!("Creating distributed compile request", compile_out_pretty);
             let dist_output_paths = compilation.outputs()
                 .map(|(_key, path)| path_transformer.to_dist_abs(&cwd.join(path)))
                 .collect::<Option<_>>()
@@ -450,7 +442,7 @@ where
                 .map(|packagers| (dist_compile_cmd, packagers, dist_output_paths))
         })
         .and_then(move |(mut dist_compile_cmd, (inputs_packager, toolchain_packager, outputs_rewriter), dist_output_paths)| {
-            debug!("[{}]: Identifying dist toolchain for {:?}", compile_out_pretty2, local_executable);
+            debug!("Identifying dist toolchain for {:?}", compile_out_pretty2, local_executable);
             dist_client.put_toolchain(&local_executable, &weak_toolchain_key, toolchain_packager)
                 .and_then(|(dist_toolchain, maybe_dist_compile_executable)| {
                     if let Some(dist_compile_executable) = maybe_dist_compile_executable {
@@ -460,12 +452,12 @@ where
                 })
         })
         .and_then(move |(dist_client, dist_compile_cmd, dist_toolchain, inputs_packager, outputs_rewriter, dist_output_paths)| {
-            debug!("[{}]: Requesting allocation", compile_out_pretty3);
+            debug!("Requesting allocation", compile_out_pretty3);
             dist_client.do_alloc_job(dist_toolchain.clone()).chain_err(|| "failed to allocate job")
                 .and_then(move |jares| {
                     let alloc = match jares {
                         dist::AllocJobResult::Success { job_alloc, need_toolchain: true } => {
-                            debug!("[{}]: Sending toolchain {} for job {}",
+                            debug!("Sending toolchain {} for job {}",
                                 compile_out_pretty3, dist_toolchain.archive_id, job_alloc.job_id);
                             Box::new(dist_client.do_submit_toolchain(job_alloc.clone(), dist_toolchain)
                                 .and_then(move |res| {
@@ -487,7 +479,7 @@ where
                     alloc
                         .and_then(move |job_alloc| {
                             let job_id = job_alloc.job_id;
-                            debug!("[{}]: Running job", compile_out_pretty3);
+                            debug!("Running job", compile_out_pretty3);
                             dist_client.do_run_job(job_alloc, dist_compile_cmd, dist_output_paths, inputs_packager)
                                 .map(move |res| (job_id, res))
                                 .chain_err(|| "could not run distributed compilation job")
@@ -547,7 +539,7 @@ where
                 errmsg.push_str(": ");
                 errmsg.push_str(&cause.to_string());
             }
-            warn!("[{}]: Could not perform distributed compile, falling back to local: {}", compile_out_pretty4, errmsg);
+            warn!("Could not perform distributed compile, falling back to local: {}", compile_out_pretty4, errmsg);
             compile_cmd.execute(&creator).map(|o| (DistType::Error, o))
         })
         .map(move |(dt, o)| (cacheable, dt, o))

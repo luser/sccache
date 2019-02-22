@@ -60,6 +60,8 @@ use tokio_serde_bincode::{ReadBincode, WriteBincode};
 use tokio_service::Service;
 use tokio_tcp::TcpListener;
 use tokio_timer::{Delay, Timeout};
+use tokio_trace::field;
+use tokio_trace_futures::Instrument;
 use util; //::fmt_duration_as_secs;
 
 use errors::*;
@@ -426,12 +428,14 @@ impl<C: CommandCreatorSync> SccacheServer<C> {
 
         // Create our "server future" which will simply handle all incoming
         // connections in separate tasks.
+        let mut id = 0..;
         let server = listener.incoming().for_each(move |socket| {
+            let span = span!("handle_client", id = id.next().unwrap());
             trace!("incoming connection");
             tokio::runtime::current_thread::TaskExecutor::current()
                 .spawn_local(Box::new(service.clone().bind(socket).map_err(|err| {
                     error!("{}", err);
-                }))).unwrap();
+                }).instrument(span))).unwrap();
             Ok(())
         });
 
@@ -565,8 +569,6 @@ where
     type Future = SFuture<Self::Response>;
 
     fn call(&self, req: Self::Request) -> Self::Future {
-        trace!("handle_client");
-
         // Opportunistically let channel know that we've received a request. We
         // ignore failures here as well as backpressure as it's not imperative
         // that every message is received.
@@ -598,8 +600,8 @@ where
                 return Box::new(
                     future
                         .join(info_future)
-                        .map(move |(_, info)| Message::WithoutBody(Response::ShuttingDown(info))),
-                );
+                        .map(move |(_, info)| Message::WithoutBody(Response::ShuttingDown(info)))
+                    );
             }
         };
 
@@ -833,6 +835,7 @@ where
             CacheControl::Default
         };
         let out_pretty = hasher.output_pretty().into_owned();
+        let span = span!("compile", out = &field::display(out_pretty));
         let color_mode = hasher.color_mode();
         let result = hasher.get_cached_or_compile(
             self.dist_client.get_client(),
@@ -917,12 +920,12 @@ where
                 Err(err) => {
                     use std::fmt::Write;
 
-                    error!("[{:?}] fatal error: {}", out_pretty, err);
+                    error!("fatal error: {}", err);
 
                     let mut error = format!("sccache: encountered fatal error\n");
                     drop(writeln!(error, "sccache: error : {}", err));
                     for e in err.iter() {
-                        error!("[{:?}] \t{}", out_pretty, e);
+                        error!("\t{}", e);
                         drop(writeln!(error, "sccache:  cause: {}", e));
                     }
                     stats.cache_errors.increment(&kind);
@@ -943,8 +946,7 @@ where
                     //TODO: save cache stats!
                     Ok(Some(info)) => {
                         debug!(
-                            "[{}]: Cache write finished in {}",
-                            info.object_file_pretty,
+                            "Cache write finished in {}",
                             util::fmt_duration_as_secs(&info.duration)
                         );
                         me.stats.borrow_mut().cache_writes += 1;
@@ -957,7 +959,7 @@ where
             });
 
             send.join(cache_write).then(|_| Ok(()))
-        });
+        }).instrument(span);
 
         tokio::runtime::current_thread::TaskExecutor::current()
             .spawn_local(Box::new(task))
